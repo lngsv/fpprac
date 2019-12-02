@@ -89,7 +89,10 @@
     (define/public (change-state pos S)
       (let* ((my-row (get-field lst (get-field my-row S)))
              (op-row (get-field lst (get-field op-row S)))
-             (seeds (mlist-ref my-row pos))) ; количество камней в выбранной для хода лунке
+             (seeds (mlist-ref my-row pos)) ; количество камней в выбранной для хода лунке
+             (res-S (new kalah-board%))
+             (res-my-row (get-field lst (get-field my-row res-S)))
+             (res-op-row (get-field lst (get-field op-row res-S)))) 
         ; считаем, сколько будет камней в каждой лунке:
         ; в реальной игре игрок бы взял камни в выбранной лунке
         ; и клал бы камни по одному в каждую лункц против часовой стрелки
@@ -108,7 +111,7 @@
              )
            )
           ))))
-          (begin (set-mcar! my-row (mcar new-my-row)) (set-mcdr! my-row (mcdr new-my-row))))
+          (begin (set-mcar! res-my-row (mcar new-my-row)) (set-mcdr! res-my-row (mcdr new-my-row))))
           
           ; обрабатываем op-row
           (let ((new-op-row
@@ -125,38 +128,37 @@
            )
           )))
           ))
-          (begin (set-mcar! op-row (mcar new-op-row)) (set-mcdr! op-row (mcdr new-op-row))))
+          (begin (set-mcar! res-op-row (mcar new-op-row)) (set-mcdr! res-op-row (mcdr new-op-row))))
 
           ; захват камней противника
           (let ((last-house (+ pos (remainder seeds 13))))
             (cond ((and
-                 (< last-house 6) ; последний камень положили в свою лунку
-                 (= (mlist-ref my-row last-house) 1) ; последняя лунка была пустая
-                 (> (mlist-ref op-row (- 5 last-house)) 0) ; противоположная лунка непустая
-                )
-                (begin
-                  (set-mcar! (mlist-tail my-row 6) (+ (mlist-ref my-row 6)
-                                                      (mlist-ref op-row (- 5 last-house))
-                                                      1))
-                  (set-mcar! (mlist-tail my-row last-house) 0)
-                  (set-mcar! (mlist-tail op-row (- 5 last-house)) 0)
-                )
+                    (< last-house 6) ; последний камень положили в свою лунку
+                    (= (mlist-ref res-my-row last-house) 1) ; последняя лунка была пустая
+                    (> (mlist-ref res-op-row (- 5 last-house)) 0) ; противоположная лунка непустая
+                   )
+                   (set-mcar! (mlist-tail res-my-row 6) (+ (mlist-ref res-my-row 6)
+                                                           (mlist-ref res-op-row (- 5 last-house))
+                                                           1))
+                   (set-mcar! (mlist-tail res-my-row last-house) 0)
+                   (set-mcar! (mlist-tail res-op-row (- 5 last-house)) 0)
             ))
           )
           
-          ; возвращение ответа
-          ; 'game-over - один из рядов опустел - заканчиваем игру
-          ; 'my-turn - последний камень попал в калах - повтор хода
-          ; 'op-turn - в любом другом случае передаем ход противнику
-          (let ((my-sum (- (foldl + 0 (mlist->list my-row)) (mlist-ref my-row 6)))
-                (op-sum (- (foldl + 0 (mlist->list op-row)) (mlist-ref op-row 6))))
+          ; возвращение ответа: статус + новое состояние
+          ; статусы:
+          ;   'game-over - один из рядов опустел - заканчиваем игру
+          ;   'my-turn - последний камень попал в калах - повтор хода
+          ;   'op-turn - в любом другом случае передаем ход противнику
+          (let ((my-sum (- (foldl + 0 (mlist->list res-my-row)) (mlist-ref res-my-row 6)))
+                (op-sum (- (foldl + 0 (mlist->list res-op-row)) (mlist-ref res-op-row 6))))
             (cond
               ((or (= my-sum 0) (= op-sum 0))
-               (begin (set-mcar! my-row 0) (set-mcdr! my-row (mlist 0 0 0 0 0 (+ (mlist-ref my-row 6) my-sum)))
-                      (set-mcar! op-row 0) (set-mcdr! op-row (mlist 0 0 0 0 0 (+ (mlist-ref op-row 6) op-sum)))
-                      'game-over))
-              ((= (+ pos (remainder seeds 13)) 6) 'my-turn)
-              (else 'op-turn)
+               (set-mcar! res-my-row 0) (set-mcdr! res-my-row (mlist 0 0 0 0 0 (+ (mlist-ref res-my-row 6) my-sum)))
+               (set-mcar! res-op-row 0) (set-mcdr! res-op-row (mlist 0 0 0 0 0 (+ (mlist-ref res-op-row 6) op-sum)))
+               (values 'game-over res-S))
+              ((= (+ pos (remainder seeds 13)) 6) (values 'my-turn res-S))
+              (else (values 'op-turn res-S))
             )
           )
         )
@@ -167,8 +169,8 @@
   )
 )
 
-; класс-игрок, управляемый с клавиатуры
-(define interactive-player%
+; класс-игрок
+(define player%
   (class kalah%
     (super-new)
 
@@ -207,40 +209,52 @@
           ) #t #f
       )
     )
+  )
+)
+
+; класс-игрок, управляемый с клавиатуры
+(define interactive-player%
+  (class player%
+    (super-new)
+
+    (inherit-field name op board my-row op-row)
+    (inherit change-state my-win? op-win? draw?)
+    
 
     ; просит пользователя ввести число, пока подается "плохой" val
-    (define (improve-input val)
+    ; завершает игру, если введено 'quit
+    (define (process-input val)
       (cond
+        [(eq? val 'quit) (kill-thread (current-thread))]
         [(not (and (number? val) (<= 1 val 6)))
-         (begin
-           (println (text "Введите число от 1 до 6:" MESSAGE_STYLE))
-           (improve-input (read)))]
+         (println (text "Введите число от 1 до 6:" MESSAGE_STYLE))
+         (process-input (read))]
         [(= (mlist-ref (get-field lst my-row) (sub1 val)) 0)
-         (begin
-           (println (text "Выберите непустую лунку:" MESSAGE_STYLE))
-           (improve-input (read)))]
+         (println (text "Выберите непустую лунку:" MESSAGE_STYLE))
+         (process-input (read))]
         [else val]
       )
     )
 
     ; ход игрока
-    ; вызов функции изменения состояния доски и передача хода или окончание игры
+    ; изменения состояния доски и передача хода или окончание игры
     (define/public (make-move)
-      (begin
-        (send board show-state)
-        (println (text (~a "Ход " name) MESSAGE_STYLE))
-        (let* ((val (read)) (ans (change-state (sub1 (improve-input val)) board)))
-          (case ans
-            [(my-turn) (begin (println (text (~a "Последний камень попал в калах! Снова ход " name "!") MESSAGE_STYLE))
-                               (make-move))]
-            [(op-turn) (send op make-move)]
-            [(game-over)
-             (begin (send board show-state) (print (text "Игра окончена! " MESSAGE_STYLE))
-                    (println (text (cond [(my-win?) (~a "Победа " name "!")]
-                                [(op-win?) (~a "Победа " (get-field name op) "!")]
-                                [else "Ничья!"]) MESSAGE_STYLE)))]
-            [else (error 'make-move "invalid status: ~a\n" ans)]
-          )
+      (send board show-state)
+      (println (text (~a "Ход " name) MESSAGE_STYLE))
+      (let* ((val (read)))
+        (define-values (ans new-S) (change-state (sub1 (process-input val)) board))
+        (set-field! lst my-row (get-field lst (get-field my-row new-S)))
+        (set-field! lst op-row (get-field lst (get-field op-row new-S)))
+        (case ans
+          [(my-turn) (begin (println (text (~a "Последний камень попал в калах! Снова ход " name "!") MESSAGE_STYLE))
+                            (make-move))]
+          [(op-turn) (send op make-move)]
+          [(game-over)
+           (begin (send board show-state) (print (text "Игра окончена! " MESSAGE_STYLE))
+                  (println (text (cond [(my-win?) (~a "Победа " name "!")]
+                                       [(op-win?) (~a "Победа " (get-field name op) "!")]
+                                       [else "Ничья!"]) MESSAGE_STYLE)))]
+          [else (error 'make-move "invalid status: ~a\n" ans)]
         )
       )
     )
@@ -270,7 +284,7 @@
   ))
   (set-field! op A B)
   (set-field! op B A)
-  (send A make-move)
+  (thread-wait (thread (lambda () (send A make-move)))) ; создаем нить, чтобы по (exit) интерпретатор "не замораживался"
 )
 
 ; Примеры запуска игры
@@ -278,4 +292,3 @@
 ; (start-game capture-check-board 'interactive 'interactive) ; демонстрация захвата
 ; (start-game pre-win-board 'interactive 'interactive) ; демонстрация выигрыша
 ; (start-game pre-draw-board 'interactive 'interactive) ; демонстрация ничьей
-

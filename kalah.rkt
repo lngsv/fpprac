@@ -1,25 +1,78 @@
 #lang racket
 (require racket/class
-         racket/set
-         lazy/force
-         racket/promise
-         racket/serialize
          compatibility/mlist
-         (only-in racket/list shuffle argmax))
+         racket/draw
+         pict
+         pict/color)
 
 
-(define seeds-per-house 6)
+(define DEFAULT_STYLE (make-object font% 14 'modern)) ; шрифт по умолчанию
+(define STORE_STYLE (cons 'bold DEFAULT_STYLE)) ; шрифт для калахов
+(define MESSAGE_STYLE (cons 'italic DEFAULT_STYLE)) ; шрифт для сообщений
 
-; класс, описывающий игральную доску
-(define kalah-board%
+(define seeds-per-house 6) ; сложность игры, изначальное количество камней в лунке
+
+; класс, описывающий ряд лунок
+(define kalah-row%
   (let ((n seeds-per-house))
     (class object%
       (super-new)
+      (init-field [lst (mlist n n n n n n 0)]) ; последнее значение - калах
+    )
+  )
+)
 
-      (init-field
-       [u (mlist n n n n n n 0)]
-       [d (mlist n n n n n n 0)]
+; класс, описывающий игральную доску
+(define kalah-board%
+  (class object%
+    (super-new)
+
+    (init-field [op-row (new kalah-row%)] [my-row (new kalah-row%)])
+
+    (define STORE_COLOR "darkorange") ; цвет калахов
+    (define HOUSE_COLOR "olivedrab") ; цвет лунок
+
+    
+    ; выводит значение x в нужном формате
+    ; текущий формат: padding=3
+    ; color - цвет выводимого текста
+    ; style - шрифт выводимого текста
+    (define (print-colorized-int x color style)
+      (print (colorize
+              (text (cond [(<= 0 x 9) (~a "  " x)]
+                          [else (~a " " x)]) style)
+              color
+      ))
+    )
+
+    
+    ; TODO: подумать над представлением;
+    ; надо как-то выделить калахи
+    (define/public (show-state)
+      (printf "\n")
+      (let ((rev (mreverse (get-field lst op-row))))
+        (print-colorized-int (mcar rev) STORE_COLOR STORE_STYLE)
+        (mfor-each
+         (lambda (x)
+           (print-colorized-int x HOUSE_COLOR DEFAULT_STYLE)
+         )
+         (mcdr rev)
+        )
       )
+      (printf "\n")
+      (print (text "   " DEFAULT_STYLE))
+      (mfor-each
+       (lambda (x i)
+         (if (= i 6)
+             (print-colorized-int x STORE_COLOR STORE_STYLE)
+             (print-colorized-int x HOUSE_COLOR DEFAULT_STYLE)
+         )
+       )
+       (get-field lst my-row)
+       (list->mlist (build-list 7 values))
+      )
+      (printf "\n")
+      (printf "\n")
     )
   )
 )
@@ -27,45 +80,20 @@
 (define kalah%
   (class object%
     (super-new)
-
-    (init-field board my-row op-row)
-
-    ; TODO: придумать норм представление;
-    ; возможно, имеет смысл "поворачивать" доску так,
-    ; чтобы ряд играющего был нижним;
-    ; надо как-то выделить калахи
-    (define/public (show-state)
-      (display "u:")
-      (mfor-each
-       (lambda (x)
-         (printf " ~a" x)
-       )
-       (get-field u board)
-      )
-      (printf "\n")
-      (display "d:")
-      (mfor-each
-       (lambda (x)
-         (printf " ~a" x)
-       )
-       (get-field d board)
-      )
-      (printf "\n")
-    )
-
-
     
     ; функция "делающая ход"
     ; pos - выбранная лунка (0..5)
-    (define/public (change-state pos)
-      ; seeds - количество камней в выбранной для хода лунке
-      (let ((seeds (mlist-ref my-row pos)))
+    ; S - исходное состояние
+    (define/public (change-state pos S)
+      (let* ((my-row (get-field lst (get-field my-row S)))
+             (op-row (get-field lst (get-field op-row S)))
+             (seeds (mlist-ref my-row pos))) ; количество камней в выбранной для хода лунке
         ; считаем, сколько будет камней в каждой лунке:
         ; в реальной игре игрок бы взял камни в выбранной лунке
         ; и клал бы камни по одному в каждую лункц против часовой стрелки
         ; получилось бы какое-то количество полных кругов и один неполный
         (begin
-          ; обрабатывает my-row
+          ; обрабатываем my-row
           (let ((new-my-row
           (list->mlist (build-list
            7
@@ -78,7 +106,7 @@
              )
            )
           ))))
-          (set-mcar! my-row (mcar new-my-row)) (set-mcdr! my-row (mcdr new-my-row)))
+          (begin (set-mcar! my-row (mcar new-my-row)) (set-mcdr! my-row (mcdr new-my-row))))
           
           ; обрабатываем op-row
           (let ((new-op-row
@@ -91,10 +119,11 @@
                   (if (<= 1 shifted (remainder seeds 13)) 1 0) ; камни, которые положатся на последнем, неполном круге
                   (mlist-ref op-row x) ; то, что было в лунке
                )
-             ))))
+             ))
            )
           )))
-          (set-mcar! op-row (mcar new-op-row)) (set-mcdr! op-row (mcdr new-op-row)))
+          ))
+          (begin (set-mcar! op-row (mcar new-op-row)) (set-mcdr! op-row (mcdr new-op-row))))
 
           ; захват камней противника
           (let ((last-house (+ pos (remainder seeds 13))))
@@ -136,37 +165,43 @@
   )
 )
 
+; класс-игрок, управляемый с клавиатуры
 (define interactive-player%
   (class kalah%
     (super-new)
 
-    (init-field name)
-    (field [op 'undefined])
-    (inherit show-state)
+    (init-field name ; имя игрока
+                my-row ; ряд игрока
+                op-row ; ряд противника
+    )
+    (field [op 'undefined] ; класс - игрок-противник
+           [board (new kalah-board% [my-row my-row] [op-row op-row])] ; доска
+    ) 
     (inherit change-state)
-    (inherit-field my-row)
-    (inherit-field op-row)
-    
+
+    ; проверка собственного выигрыша
     (define/public (my-win?)
       (if (>
-           (mlist-ref my-row 6)
-           (mlist-ref op-row 6)
+           (mlist-ref (get-field lst my-row) 6)
+           (mlist-ref (get-field lst op-row) 6)
           ) #t #f
       )
     )
 
+    ; проверка выигрыша противника 
     (define/public (op-win?)
       (if (<
-           (mlist-ref my-row 6)
-           (mlist-ref op-row 6)
+           (mlist-ref (get-field lst my-row) 6)
+           (mlist-ref (get-field lst op-row) 6)
           ) #t #f
       )
     )
 
+    ; проверка ничьи
     (define/public (draw?)
       (if (=
-           (mlist-ref my-row 6)
-           (mlist-ref op-row 6)
+           (mlist-ref (get-field lst my-row) 6)
+           (mlist-ref (get-field lst op-row) 6)
           ) #t #f
       )
     )
@@ -176,31 +211,33 @@
       (cond
         [(not (and (number? val) (<= 1 val 6)))
          (begin
-           (displayln "Введите число от 1 до 6:")
+           (println (text "Введите число от 1 до 6:" MESSAGE_STYLE))
            (improve-input (read)))]
-        [(= (mlist-ref my-row (sub1 val)) 0)
+        [(= (mlist-ref (get-field lst my-row) (sub1 val)) 0)
          (begin
-           (displayln "Выберите непустую лунку:")
+           (println (text "Выберите непустую лунку:" MESSAGE_STYLE))
            (improve-input (read)))]
         [else val]
       )
     )
-    
+
+    ; ход игрока
+    ; вызов функции изменения состояния доски и передача хода или окончание игры
     (define/public (make-move)
       (begin
-        (show-state)
-        (printf "Ход ~a\n" name)
-        (let* ((val (read)) (ans (change-state (sub1 (improve-input val)))))
+        (send board show-state)
+        (println (text (~a "Ход " name) MESSAGE_STYLE))
+        (let* ((val (read)) (ans (change-state (sub1 (improve-input val)) board)))
           (case ans
-            [(my-turn) (begin (printf "Последний камень попал в калах! Снова ход ~a!\n" name)
+            [(my-turn) (begin (println (text (~a "Последний камень попал в калах! Снова ход " name "!") MESSAGE_STYLE))
                                (make-move))]
             [(op-turn) (send op make-move)]
             [(game-over)
-             (begin (show-state) (printf "Игра окончена! ~a\n" 
-                          (cond [(my-win?) (~a "Победа " name "!" #:separator "")]
-                                [(op-win?) (~a "Победа " (get-field name op) "!" #:separator "")]
-                                [else "Ничья!"])))]
-            [else (printf "INVALID: ~a\n" ans)]
+             (begin (send board show-state) (print (text "Игра окончена! " MESSAGE_STYLE))
+                    (println (text (cond [(my-win?) (~a "Победа " name "!")]
+                                [(op-win?) (~a "Победа " (get-field name op) "!")]
+                                [else "Ничья!"]) MESSAGE_STYLE)))]
+            [else (error 'make-move "invalid status: ~a\n" ans)]
           )
         )
       )
@@ -208,13 +245,35 @@
   )
 )
 
-(define new-board (new kalah-board%))
-(define capture-check-board (new kalah-board% [u (mlist 0 3 0 5 0 0 7)] [d (mlist 0 1 0 0 0 0 8)]))
-(define pre-draw-board (new kalah-board% [u (mlist 0 1 2 3 4 0 1)] [d (mlist 0 0 0 0 0 1 10)]))
 
-(define init-board new-board)
-(define A (new interactive-player% [name "A"] [board init-board] [my-row (get-field u init-board)] [op-row (get-field d init-board)]))
-(define B (new interactive-player% [name "B"] [board init-board] [my-row (get-field d init-board)] [op-row (get-field u init-board)]))
-(set-field! op A B)
-(set-field! op B A)
-(send B make-move)
+; доски в разных состояниях
+(define new-board (new kalah-board%)) ; начальное состояние
+(define capture-check-board (new kalah-board% [op-row (new kalah-row% [lst (mlist 0 3 0 5 0 0 7)])] [my-row (new kalah-row% [lst (mlist 0 1 0 0 0 1 8)])])) ; демонстрация захвата
+(define pre-win-board (new kalah-board% [op-row (new kalah-row% [lst (mlist 0 3 0 5 0 0 7)])] [my-row (new kalah-row% [lst (mlist 0 0 0 0 0 1 8)])])) ; демонстрация выигрыша
+(define pre-draw-board (new kalah-board% [op-row (new kalah-row% [lst (mlist 0 1 2 3 4 0 1)])] [my-row (new kalah-row% [lst (mlist 0 0 0 0 0 1 10)])])) ; демонстрация ничьей
+
+; задание запускаемой игры
+; init-board - изначальное состояние доски (new-board | apture-check-board | pre-win-board | pre-draw-board)
+; player-A-class, player-B-class - название класса создаваемых игроков (interactive)
+(define (start-game init-board player-A-class player-B-class)
+  (define A (case player-A-class
+    [(interactive) 
+     (new interactive-player% [name "A"] [my-row (get-field my-row init-board)] [op-row (get-field op-row init-board)])]
+    [else (error 'start-game "INVALID player-A-class")]
+  ))
+  (define B (case player-B-class
+    [(interactive)
+     (new interactive-player% [name "B"] [my-row (get-field op-row init-board)] [op-row (get-field my-row init-board)])]
+    [else (error 'start-game "INVALID player-B-class")]
+  ))
+  (set-field! op A B)
+  (set-field! op B A)
+  (send A make-move)
+)
+
+; Примеры запуска игры
+; (start-game new-board 'interactive 'interactive) ; начальное состояние
+; (start-game capture-check-board 'interactive 'interactive) ; демонстрация захвата
+; (start-game pre-win-board 'interactive 'interactive) ; демонстрация выигрыша
+; (start-game pre-draw-board 'interactive 'interactive) ; демонстрация ничьей
+

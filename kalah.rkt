@@ -27,7 +27,9 @@
   (class object%
     (super-new)
 
-    (init-field [op-row (new kalah-row%)] [my-row (new kalah-row%)])
+    (init-field [op-row (new kalah-row%)] ; верхний ряд
+                [my-row (new kalah-row%)] ; нижний ряд
+    )
 
     (define STORE_COLOR "darkorange") ; цвет калахов
     (define HOUSE_COLOR "olivedrab") ; цвет лунок
@@ -45,9 +47,9 @@
       ))
     )
 
-    
-    ; TODO: подумать над представлением;
-    ; надо как-то выделить калахи
+
+    ; выводит состояние доски
+    ; ряд играющего игрока - нижний
     (define/public (show-state)
       (printf "\n")
       (let ((rev (mreverse (get-field lst op-row))))

@@ -76,6 +76,25 @@
       (printf "\n")
       (printf "\n")
     )
+
+    ; эвристическая оценка состояния
+    ; разность между количествами камней в ряду игрока и его противника
+    (define/public (h-est)
+      (foldl (lambda (my op res) (+ res (- my op)))
+             0
+             (mlist->list (get-field lst my-row))
+             (mlist->list (get-field lst op-row))
+      )
+    )
+
+    ; список возможных ходов - непустых лунок текущего игрока
+    (define/public (possible-moves)
+      (foldl (lambda (x i res) (if (and (< i 6) (> x 0)) (cons x res) res))
+             '()
+             (mlist->list (get-field lst my-row))
+             (build-list 7 values)
+      )
+    )
   )
 )
 
@@ -153,12 +172,12 @@
           (let ((my-sum (- (foldl + 0 (mlist->list res-my-row)) (mlist-ref res-my-row 6)))
                 (op-sum (- (foldl + 0 (mlist->list res-op-row)) (mlist-ref res-op-row 6))))
             (cond
-              ((or (= my-sum 0) (= op-sum 0))
+              [(or (= my-sum 0) (= op-sum 0))
                (set-mcar! res-my-row 0) (set-mcdr! res-my-row (mlist 0 0 0 0 0 (+ (mlist-ref res-my-row 6) my-sum)))
                (set-mcar! res-op-row 0) (set-mcdr! res-op-row (mlist 0 0 0 0 0 (+ (mlist-ref res-op-row 6) op-sum)))
-               (values 'game-over res-S))
-              ((= (+ pos (remainder seeds 13)) 6) (values 'my-turn res-S))
-              (else (values 'op-turn res-S))
+               (values 'game-over res-S)]
+              [(= (+ pos (remainder seeds 13)) 6) (values 'my-turn res-S)]
+              [else (values 'op-turn res-S)]
             )
           )
         )
@@ -219,7 +238,6 @@
 
     (inherit-field name op board my-row op-row)
     (inherit change-state my-win? op-win? draw?)
-    
 
     ; просит пользователя ввести число, пока подается "плохой" val
     ; завершает игру, если введено 'quit
@@ -241,8 +259,99 @@
     (define/public (make-move)
       (send board show-state)
       (println (text (~a "Ход " name) MESSAGE_STYLE))
-      (let* ((val (read)))
+      (let ((val (read)))
         (define-values (ans new-S) (change-state (sub1 (process-input val)) board))
+        (set-field! lst my-row (get-field lst (get-field my-row new-S)))
+        (set-field! lst op-row (get-field lst (get-field op-row new-S)))
+        (case ans
+          [(my-turn) (begin (println (text (~a "Последний камень попал в калах! Снова ход " name "!") MESSAGE_STYLE))
+                            (make-move))]
+          [(op-turn) (send op make-move)]
+          [(game-over)
+           (begin (send board show-state) (print (text "Игра окончена! " MESSAGE_STYLE))
+                  (println (text (cond [(my-win?) (~a "Победа " name "!")]
+                                       [(op-win?) (~a "Победа " (get-field name op) "!")]
+                                       [else "Ничья!"]) MESSAGE_STYLE)))]
+          [else (error 'make-move "invalid status: ~a\n" ans)]
+        )
+      )
+    )
+  )
+)
+
+; класс-игрок, управляемый компьютером 
+(define machine-player%
+  (class player%
+    (super-new)
+
+    (init-field [look-ahead 4])
+    (inherit-field name op board my-row op-row)
+    (inherit change-state my-win? op-win? draw?)
+
+    ; Реализация минимакса с альфа-бета отсечением
+    (define (minimax tree)
+      (define (minimax-h node alpha beta max-player)
+        (define (next-max x v)
+          (if (or (null? x) (<= beta v)) 
+              v
+              (next-max (cdr x)
+                        (max v (minimax-h (car x) v beta (not max-player))))
+          )
+        )
+        (define (next-min x v)
+          (if (or (null? x) (<= v alpha)) 
+              v
+              (next-min (cdr x)
+                        (min v (minimax-h (car x) alpha v (not max-player))))
+          )
+        )
+        (cond [(number? node) node]
+              [(null? node) 0.0]
+              [max-player (next-max node alpha)]
+              [else (next-min node beta)])
+      )
+      (minimax-h tree -inf.0 +inf.0 #f)
+    )
+
+    ; game-tree :: State -> (Move -> (Tree of Real))
+    ; построение дерева игры с оценками
+    ; S - корень дерева, исходное состояние
+    ; m - один из возможных ходов
+    ; look-ahead - глубина выходного дерева
+    (define (game-tree S m look-ahead)
+      ; вспомогательная функция, строящая закольцованный список из пары элементов
+      (define (help a b) (begin (define l (mlist a b a)) (set-mcdr! l (mcons b l)) l))
+      (define (new-ply moves i S)	  
+        (cond
+          ((my-win? S) +inf.0) ; выигрышная позиция => + бесконечность
+          ((op-win? S) -inf.0) ; проигрышная => - бесконечность
+          ((draw? S) 0) ; ничья => 0
+          ((>= i look-ahead)  (send S h-est)) ; если исчерпана глубина, то используется эвристическая оценка 
+          (else (map (lambda (x) (new-ply (mcdr moves) (+ 1 i) ((mcar moves) S x)))
+                     (send S possible-moves))) ; рассматриваем все возможные ходы и строим их оценки
+		))
+     (let ((my-move (lambda (m S) (define-values (ans new-S) (change-state m S)))
+           (op-move (lambda (m S) (send op change-state m S))))
+       (new-ply (help op-move my-move) 1 (my-move m S))
+     )
+    )
+
+    ; выбор оптимального хода по минимаксу 
+    ; из нескольких оптимальных выбирается один случайно
+    ; look-ahead - глубина просмотра дерева
+    ; S - корень просматриваемого дерева
+    (define ((optimal-move look-ahead) S)
+      (argmax (lambda (m) (minimax (game-tree S m look-ahead)))
+              (shuffle (send S possible-moves))
+      )
+    )
+    
+    (define/public (make-move)
+      (send board show-state)
+      (println (text (~a "Ход " name) MESSAGE_STYLE))
+      (let ((val ((optimal-move look-ahead) board)))
+        (println (text (~a val) MESSAGE_STYLE))
+        (define-values (ans new-S) (change-state val board))
         (set-field! lst my-row (get-field lst (get-field my-row new-S)))
         (set-field! lst op-row (get-field lst (get-field op-row new-S)))
         (case ans
@@ -268,18 +377,25 @@
 (define pre-win-board (new kalah-board% [op-row (new kalah-row% [lst (mlist 0 3 0 5 0 0 7)])] [my-row (new kalah-row% [lst (mlist 0 0 0 0 0 1 8)])])) ; демонстрация выигрыша
 (define pre-draw-board (new kalah-board% [op-row (new kalah-row% [lst (mlist 0 1 2 3 4 0 1)])] [my-row (new kalah-row% [lst (mlist 0 0 0 0 0 1 10)])])) ; демонстрация ничьей
 
+; "сила" игроков, управляемых компьютером (глубина просмотра минимакса)
+(define machine-strength 4)
+
 ; задание запускаемой игры
 ; init-board - изначальное состояние доски (new-board | apture-check-board | pre-win-board | pre-draw-board)
-; player-A-class, player-B-class - название класса создаваемых игроков (interactive)
+; player-A-class, player-B-class - название класса создаваемых игроков (interactive | machine)
 (define (start-game init-board player-A-class player-B-class)
   (define A (case player-A-class
     [(interactive) 
      (new interactive-player% [name "A"] [my-row (get-field my-row init-board)] [op-row (get-field op-row init-board)])]
+    [(machine)
+     (new machine-player% [name "A"] [my-row (get-field my-row init-board)] [op-row (get-field op-row init-board)] [look-ahead machine-strength])]
     [else (error 'start-game "INVALID player-A-class")]
   ))
   (define B (case player-B-class
     [(interactive)
      (new interactive-player% [name "B"] [my-row (get-field op-row init-board)] [op-row (get-field my-row init-board)])]
+    [(machine)
+     (new machine-player% [name "B"] [my-row (get-field op-row init-board)] [op-row (get-field my-row init-board)] [look-ahead machine-strength])]
     [else (error 'start-game "INVALID player-B-class")]
   ))
   (set-field! op A B)

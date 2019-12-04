@@ -34,7 +34,7 @@
     (define STORE_COLOR "darkorange") ; цвет калахов
     (define HOUSE_COLOR "olivedrab") ; цвет лунок
 
-    
+
     ; выводит значение x в нужном формате
     ; текущий формат: padding=3
     ; color - цвет выводимого текста
@@ -89,10 +89,37 @@
 
     ; список возможных ходов - непустых лунок текущего игрока
     (define/public (possible-moves)
-      (foldl (lambda (x i res) (if (and (< i 6) (> x 0)) (cons x res) res))
+      (foldl (lambda (x i res) (if (and (< i 6) (> x 0)) (cons i res) res))
              '()
              (mlist->list (get-field lst my-row))
              (build-list 7 values)
+      )
+    )
+
+    ; проверка собственного выигрыша
+    (define/public (my-win?)
+      (if (>
+           (mlist-ref (get-field lst my-row) 6)
+           (mlist-ref (get-field lst op-row) 6)
+          ) #t #f
+      )
+    )
+
+    ; проверка выигрыша противника
+    (define/public (op-win?)
+      (if (<
+           (mlist-ref (get-field lst my-row) 6)
+           (mlist-ref (get-field lst op-row) 6)
+          ) #t #f
+      )
+    )
+
+    ; проверка ничьи
+    (define/public (draw?)
+      (if (=
+           (mlist-ref (get-field lst my-row) 6)
+           (mlist-ref (get-field lst op-row) 6)
+          ) #t #f
       )
     )
   )
@@ -101,7 +128,7 @@
 (define kalah%
   (class object%
     (super-new)
-    
+
     ; функция "делающая ход"
     ; pos - выбранная лунка (0..5)
     ; S - исходное состояние
@@ -111,7 +138,7 @@
              (seeds (mlist-ref my-row pos)) ; количество камней в выбранной для хода лунке
              (res-S (new kalah-board%))
              (res-my-row (get-field lst (get-field my-row res-S)))
-             (res-op-row (get-field lst (get-field op-row res-S)))) 
+             (res-op-row (get-field lst (get-field op-row res-S))))
         ; считаем, сколько будет камней в каждой лунке:
         ; в реальной игре игрок бы взял камни в выбранной лунке
         ; и клал бы камни по одному в каждую лункц против часовой стрелки
@@ -131,7 +158,7 @@
            )
           ))))
           (begin (set-mcar! res-my-row (mcar new-my-row)) (set-mcdr! res-my-row (mcdr new-my-row))))
-          
+
           ; обрабатываем op-row
           (let ((new-op-row
           (mappend (list->mlist (build-list
@@ -163,7 +190,7 @@
                    (set-mcar! (mlist-tail res-op-row (- 5 last-house)) 0)
             ))
           )
-          
+
           ; возвращение ответа: статус + новое состояние
           ; статусы:
           ;   'game-over - один из рядов опустел - заканчиваем игру
@@ -184,7 +211,7 @@
       )
     )
 
-    
+
   )
 )
 
@@ -199,35 +226,10 @@
     )
     (field [op 'undefined] ; класс - игрок-противник
            [board (new kalah-board% [my-row my-row] [op-row op-row])] ; доска
-    ) 
+    )
     (inherit change-state)
 
-    ; проверка собственного выигрыша
-    (define/public (my-win?)
-      (if (>
-           (mlist-ref (get-field lst my-row) 6)
-           (mlist-ref (get-field lst op-row) 6)
-          ) #t #f
-      )
-    )
 
-    ; проверка выигрыша противника 
-    (define/public (op-win?)
-      (if (<
-           (mlist-ref (get-field lst my-row) 6)
-           (mlist-ref (get-field lst op-row) 6)
-          ) #t #f
-      )
-    )
-
-    ; проверка ничьи
-    (define/public (draw?)
-      (if (=
-           (mlist-ref (get-field lst my-row) 6)
-           (mlist-ref (get-field lst op-row) 6)
-          ) #t #f
-      )
-    )
   )
 )
 
@@ -237,7 +239,7 @@
     (super-new)
 
     (inherit-field name op board my-row op-row)
-    (inherit change-state my-win? op-win? draw?)
+    (inherit change-state)
 
     ; просит пользователя ввести число, пока подается "плохой" val
     ; завершает игру, если введено 'quit
@@ -269,8 +271,8 @@
           [(op-turn) (send op make-move)]
           [(game-over)
            (begin (send board show-state) (print (text "Игра окончена! " MESSAGE_STYLE))
-                  (println (text (cond [(my-win?) (~a "Победа " name "!")]
-                                       [(op-win?) (~a "Победа " (get-field name op) "!")]
+                  (println (text (cond [(send board my-win?) (~a "Победа " name "!")]
+                                       [(send board op-win?) (~a "Победа " (get-field name op) "!")]
                                        [else "Ничья!"]) MESSAGE_STYLE)))]
           [else (error 'make-move "invalid status: ~a\n" ans)]
         )
@@ -279,27 +281,27 @@
   )
 )
 
-; класс-игрок, управляемый компьютером 
+; класс-игрок, управляемый компьютером
 (define machine-player%
   (class player%
     (super-new)
 
     (init-field [look-ahead 4])
     (inherit-field name op board my-row op-row)
-    (inherit change-state my-win? op-win? draw?)
+    (inherit change-state)
 
     ; Реализация минимакса с альфа-бета отсечением
     (define (minimax tree)
       (define (minimax-h node alpha beta max-player)
         (define (next-max x v)
-          (if (or (null? x) (<= beta v)) 
+          (if (or (null? x) (<= beta v))
               v
               (next-max (cdr x)
                         (max v (minimax-h (car x) v beta (not max-player))))
           )
         )
         (define (next-min x v)
-          (if (or (null? x) (<= v alpha)) 
+          (if (or (null? x) (<= v alpha))
               v
               (next-min (cdr x)
                         (min v (minimax-h (car x) alpha v (not max-player))))
@@ -321,22 +323,35 @@
     (define (game-tree S m look-ahead)
       ; вспомогательная функция, строящая закольцованный список из пары элементов
       (define (help a b) (begin (define l (mlist a b a)) (set-mcdr! l (mcons b l)) l))
-      (define (new-ply moves i S)	  
-        (cond
-          ((my-win? S) +inf.0) ; выигрышная позиция => + бесконечность
-          ((op-win? S) -inf.0) ; проигрышная => - бесконечность
-          ((draw? S) 0) ; ничья => 0
-          ((>= i look-ahead)  (send S h-est)) ; если исчерпана глубина, то используется эвристическая оценка 
-          (else (map (lambda (x) (new-ply (mcdr moves) (+ 1 i) ((mcar moves) S x)))
-                     (send S possible-moves))) ; рассматриваем все возможные ходы и строим их оценки
-		))
-     (let ((my-move (lambda (m S) (define-values (ans new-S) (change-state m S)))
-           (op-move (lambda (m S) (send op change-state m S))))
-       (new-ply (help op-move my-move) 1 (my-move m S))
-     )
+      (let ((my-move (lambda (m S) (change-state m S))) (op-move (lambda (m S) (send op change-state m S))))
+        (define-values (ans new-S) (my-move m S))
+        (let new-ply ((moves (help op-move my-move)) (i 1) (S new-S) (ans ans))
+          (case ans
+            [(game-over) (cond
+                           [(send S my-win?) +inf.0] ; выигрышная позиция => + бесконечность
+                           [(send S op-win?) -inf.0] ; проигрышная => - бесконечность
+                           [(send S draw?) 0] ; ничья => 0
+                         )]
+            [(my-turn) (if (>= i look-ahead) (send S h-est) ; если исчерпана глубина, то используется эвристическая оценка
+                           (map (lambda (x)
+                                  (define-values (a s) ((mcar moves) x S))
+                                  (new-ply moves (add1 i) s a)
+                                ) (send S possible-moves)
+                           )
+                       )]
+            [else (if (>= i look-ahead) (send S h-est) ; если исчерпана глубина, то используется эвристическая оценка
+                           (map (lambda (x)
+                                  (define-values (a s) ((mcar moves) x S))
+                                  (new-ply (mcdr moves) (add1 i) (new kalah-board% [my-row (get-field op-row s)] [op-row (get-field my-row s)]) a)
+                                ) (send S possible-moves)
+                           )
+                       )]
+          )
+        )
+      )
     )
 
-    ; выбор оптимального хода по минимаксу 
+    ; выбор оптимального хода по минимаксу
     ; из нескольких оптимальных выбирается один случайно
     ; look-ahead - глубина просмотра дерева
     ; S - корень просматриваемого дерева
@@ -345,12 +360,12 @@
               (shuffle (send S possible-moves))
       )
     )
-    
+
     (define/public (make-move)
       (send board show-state)
       (println (text (~a "Ход " name) MESSAGE_STYLE))
       (let ((val ((optimal-move look-ahead) board)))
-        (println (text (~a val) MESSAGE_STYLE))
+        (println (text (~a (add1 val)) MESSAGE_STYLE))
         (define-values (ans new-S) (change-state val board))
         (set-field! lst my-row (get-field lst (get-field my-row new-S)))
         (set-field! lst op-row (get-field lst (get-field op-row new-S)))
@@ -360,8 +375,8 @@
           [(op-turn) (send op make-move)]
           [(game-over)
            (begin (send board show-state) (print (text "Игра окончена! " MESSAGE_STYLE))
-                  (println (text (cond [(my-win?) (~a "Победа " name "!")]
-                                       [(op-win?) (~a "Победа " (get-field name op) "!")]
+                  (println (text (cond [(send board my-win?) (~a "Победа " name "!")]
+                                       [(send board op-win?) (~a "Победа " (get-field name op) "!")]
                                        [else "Ничья!"]) MESSAGE_STYLE)))]
           [else (error 'make-move "invalid status: ~a\n" ans)]
         )
@@ -378,23 +393,27 @@
 (define pre-draw-board (new kalah-board% [op-row (new kalah-row% [lst (mlist 0 1 2 3 4 0 1)])] [my-row (new kalah-row% [lst (mlist 0 0 0 0 0 1 10)])])) ; демонстрация ничьей
 
 ; "сила" игроков, управляемых компьютером (глубина просмотра минимакса)
-(define machine-strength 4)
+(define machine-strength 5)
 
 ; задание запускаемой игры
 ; init-board - изначальное состояние доски (new-board | apture-check-board | pre-win-board | pre-draw-board)
 ; player-A-class, player-B-class - название класса создаваемых игроков (interactive | machine)
 (define (start-game init-board player-A-class player-B-class)
   (define A (case player-A-class
-    [(interactive) 
+    [(interactive)
+     (println (text (~a "Игрок А - человек") MESSAGE_STYLE))
      (new interactive-player% [name "A"] [my-row (get-field my-row init-board)] [op-row (get-field op-row init-board)])]
     [(machine)
+     (println (text (~a "Игрок А - машина (ур. " machine-strength ")") MESSAGE_STYLE))
      (new machine-player% [name "A"] [my-row (get-field my-row init-board)] [op-row (get-field op-row init-board)] [look-ahead machine-strength])]
     [else (error 'start-game "INVALID player-A-class")]
   ))
   (define B (case player-B-class
     [(interactive)
+     (println (text (~a "Игрок B - человек") MESSAGE_STYLE))
      (new interactive-player% [name "B"] [my-row (get-field op-row init-board)] [op-row (get-field my-row init-board)])]
     [(machine)
+     (println (text (~a "Игрок B - машина (ур. " machine-strength ")") MESSAGE_STYLE))
      (new machine-player% [name "B"] [my-row (get-field op-row init-board)] [op-row (get-field my-row init-board)] [look-ahead machine-strength])]
     [else (error 'start-game "INVALID player-B-class")]
   ))

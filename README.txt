@@ -1,4 +1,4 @@
-Doctor visit emulation
+Doctor visit emulation (doctor.rkt)
 
 Run
 
@@ -11,3 +11,8 @@ During visit just answer questions using brackets
 --> (who are you?)
 <-- (James)
 ...
+
+
+Game Kalah (kalah.rkt)
+
+Use examples in the end of the file to start game

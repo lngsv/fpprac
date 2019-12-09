@@ -393,7 +393,8 @@
 (define pre-draw-board (new kalah-board% [op-row (new kalah-row% [lst (mlist 0 1 2 3 4 0 1)])] [my-row (new kalah-row% [lst (mlist 0 0 0 0 0 1 10)])])) ; демонстрация ничьей
 
 ; "сила" игроков, управляемых компьютером (глубина просмотра минимакса)
-(define machine-strength 5)
+(define machine-A-strength 4)
+(define machine-B-strength 4)
 
 ; задание запускаемой игры
 ; init-board - изначальное состояние доски (new-board | apture-check-board | pre-win-board | pre-draw-board)
@@ -404,8 +405,8 @@
      (println (text (~a "Игрок А - человек") MESSAGE_STYLE))
      (new interactive-player% [name "A"] [my-row (get-field my-row init-board)] [op-row (get-field op-row init-board)])]
     [(machine)
-     (println (text (~a "Игрок А - машина (ур. " machine-strength ")") MESSAGE_STYLE))
-     (new machine-player% [name "A"] [my-row (get-field my-row init-board)] [op-row (get-field op-row init-board)] [look-ahead machine-strength])]
+     (println (text (~a "Игрок А - машина (ур. " machine-A-strength ")") MESSAGE_STYLE))
+     (new machine-player% [name "A"] [my-row (get-field my-row init-board)] [op-row (get-field op-row init-board)] [look-ahead machine-A-strength])]
     [else (error 'start-game "INVALID player-A-class")]
   ))
   (define B (case player-B-class
@@ -413,8 +414,8 @@
      (println (text (~a "Игрок B - человек") MESSAGE_STYLE))
      (new interactive-player% [name "B"] [my-row (get-field op-row init-board)] [op-row (get-field my-row init-board)])]
     [(machine)
-     (println (text (~a "Игрок B - машина (ур. " machine-strength ")") MESSAGE_STYLE))
-     (new machine-player% [name "B"] [my-row (get-field op-row init-board)] [op-row (get-field my-row init-board)] [look-ahead machine-strength])]
+     (println (text (~a "Игрок B - машина (ур. " machine-B-strength ")") MESSAGE_STYLE))
+     (new machine-player% [name "B"] [my-row (get-field op-row init-board)] [op-row (get-field my-row init-board)] [look-ahead machine-B-strength])]
     [else (error 'start-game "INVALID player-B-class")]
   ))
   (set-field! op A B)
